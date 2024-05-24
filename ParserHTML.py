@@ -3,22 +3,17 @@ import requests as req
 from bs4 import BeautifulSoup
 import pymssql
 import pandas as pd
-# import csv
-# import re
 import cleantext as ct
 
-
+############    constants   #####################
 SERVER = r'DELL-T7810\SQL2019'
 DATABASE = 'Courts'
-HOST = r'https://www.mos-gorsud.ru/'
-URL = r'https://www.mos-gorsud.ru/rs/'
 HEADERS = {
     'Accept':'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
     'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36 Edg/125.0.0.0'
     }
 DATE_FROM = Date.today()
-
-courts = [
+COURTS = [
 {'url':'https://www.mos-gorsud.ru/mgs','name':'Московский городской суд'},
 {'url':'https://www.mos-gorsud.ru/rs/babushkinskij','name':'Бабушкинский районный суд'},
 {'url':'https://www.mos-gorsud.ru/rs/basmannyj','name':'Басманный районный суд'},
@@ -57,12 +52,10 @@ courts = [
 {'url':'https://www.mos-gorsud.ru/rs/shcherbinskij','name':'Щербинский районный суд'}
 ]
 
-# r = req.get(URL)
-# print(r)
-
 def clean(text):
     t =  ct.clean(text, extra_spaces=True, reg=r'[\t\r\n]', reg_replace='')
     return t
+
 def save_data(reviews):
     try:
         # Create a connection
@@ -70,23 +63,21 @@ def save_data(reviews):
         cursor = connection.cursor(as_dict=False)
 
         for item in reviews:
-            # Fill parameters
-
+            if len(item) == 11:
             # Call procedure
-            cursor.callproc('dbo.InsertReviewData',( 
-            item['DateTime'],
-            item['CourtName'],
-            item['Page'],
-            item['Number'],
-            item['Sides'],
-            item['State'],
-            item['ReviewDateTime'],
-            item['Courtroom'],
-            item['Stage'],
-            item['Judge'],
-            item['List']           
-            ))
-
+                cursor.callproc('dbo.InsertReviewData',( 
+                item['DateTime'],
+                item['CourtName'],
+                item['Page'],
+                item['Number'],
+                item['Sides'],
+                item['State'],
+                item['ReviewDateTime'],
+                item['Courtroom'],
+                item['Stage'],
+                item['Judge'],
+                item['List']           
+                ))
         # Close cursor and connection
         cursor.close()
         connection.commit()
@@ -99,6 +90,7 @@ def save_data(reviews):
         # Close the connection
         if 'connection' in locals():
             connection.close()  
+
 def prepare_parameters(date, page):
     if page == 0:
         parameters = {
@@ -111,25 +103,14 @@ def prepare_parameters(date, page):
             }
     return parameters
 
-
-params={
-    'hearingRangeDateFrom': DATE_FROM.strftime('%d.%m.%Y'),
-    'page':'333'
-    }
-
-# url = r'https://www.mos-gorsud.ru/rs/babushkinskij/hearing?hearingRangeDateFrom=22.05.2024&page=377'
-# url = r'https://www.mos-gorsud.ru/rs/babushkinskij' # &pade=377
-
-
-
 def get_html(url, params=''):
     full_url = url + '/hearing'
     r = req.get(full_url, headers=HEADERS, params=params)
     return r
 
-
 def get_content(html, court_name, page):
     page_count = 1
+    reviews = [] 
     
     if html.status_code == 200:
         soup = BeautifulSoup(html.text, 'html.parser')  
@@ -137,48 +118,48 @@ def get_content(html, court_name, page):
             # pages = soup.find("input", {"id": "paginationFormMaxPages"}) #<input type="hidden" id="paginationFormMaxPages" value="372">
             pages = soup.find(id="paginationFormMaxPages") #<input type="hidden" id="paginationFormMaxPages" value="372">
             page_count = pages.get('value')
-        
-        table = soup.find_all('div', class_='wrapper-search-tables')
+            reviews.append({r'page_count': page_count})
+        else:
+            table = soup.find_all('div', class_='wrapper-search-tables')
     
-        tbody = soup.table('tbody')
-        rows = soup.tbody('tr')
+            tbody = soup.table('tbody')
+            rows = soup.tbody('tr')
  
-        reviews = []
-        for row in rows:
-           cells = row.find_all('td')
-           reviews.append(
-                {
-                    r'DateTime': DATE_FROM.strftime("%Y-%m-%d"),
-                    r'CourtName': court_name,
-                    r'Page': page,
-                    r'Number': clean(cells[0].text),
-                    r'Sides' : clean(cells[1].text),
-                    r'State' : clean(cells[2].text),
-                    r'ReviewDateTime' : clean(cells[3].text),
-                    r'Courtroom' : clean(cells[4].text),
-                    r'Stage' : clean(cells[5].text),
-                    r'Judge' : clean(cells[6].text),
-                    r'List' : clean(cells[7].text)
-                }
-            )           
+            for row in rows:
+               cells = row.find_all('td')
+               reviews.append(
+                    {
+                        r'DateTime': DATE_FROM.strftime("%Y-%m-%d"),
+                        r'CourtName': court_name,
+                        r'Page': page,
+                        r'Number': clean(cells[0].text),
+                        r'Sides' : clean(cells[1].text),
+                        r'State' : clean(cells[2].text),
+                        r'ReviewDateTime' : clean(cells[3].text),
+                        r'Courtroom' : clean(cells[4].text),
+                        r'Stage' : clean(cells[5].text),
+                        r'Judge' : clean(cells[6].text),
+                        r'List' : clean(cells[7].text)
+                    }
+                )           
 
-        return reviews, page_count
-    else:
-        return None, page_count  
+    return reviews
 
-for court in courts:
+############    start parsing   ###############
+for court in COURTS:
     pages = 1
     url = court['url']
     court_name = court['name']
     params = prepare_parameters(DATE_FROM, 0)
     html = get_html(url, params=params)
-    reviews, pages  = get_content(html, court_name, 0)
+    reviews  = get_content(html, court_name, 0)
+    if len(reviews) == 1:
+        page_count = int(reviews[0]['page_count'])
     
-    for page in pages:
+    for page in range(1, page_count):
         params = prepare_parameters(DATE_FROM, page)
         html = get_html(url, params=params)
         reviews = get_content(html, court_name, page)
         if reviews is not None:
             save_data(reviews)
-
-# parser()
+            
